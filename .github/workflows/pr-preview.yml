@@ -56,9 +56,19 @@ jobs:
         IMAGE_TAG: pr-${{ github.event.number }}-${{ github.sha }}
         NAMESPACE: pr-${{ github.event.number }}
       run: |
-        kubectl create namespace $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
-        envsubst < k8s/deployment.yaml | kubectl apply -n $NAMESPACE -f -
-        kubectl apply -n $NAMESPACE -f k8s/service.yaml
+        # Create namespace if not exists
+        kubectl create namespace $NAMESPACE --dry-run=client -o yaml | kubectl apply -f - --validate=false
+        
+        # Wait a moment for namespace to be ready
+        sleep 2
+        
+        # Apply deployment with environment variable substitution
+        envsubst < k8s/deployment.yaml | kubectl apply -n $NAMESPACE -f - --validate=false
+        
+        # Apply service
+        kubectl apply -n $NAMESPACE -f k8s/service.yaml --validate=false
+        
+        # Wait for deployment to be ready
         kubectl rollout status deployment/styleflow-deployment -n $NAMESPACE --timeout=300s
 
     - name: Get external URL
@@ -66,34 +76,77 @@ jobs:
       env:
         NAMESPACE: pr-${{ github.event.number }}
       run: |
+        echo "Waiting for LoadBalancer to get external IP..."
         for i in {1..30}; do
-          EXTERNAL_IP=$(kubectl get svc styleflow-service -n $NAMESPACE -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
-          if [ ! -z "$EXTERNAL_IP" ]; then
+          EXTERNAL_IP=$(kubectl get svc styleflow-service -n $NAMESPACE -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+          if [ ! -z "$EXTERNAL_IP" ] && [ "$EXTERNAL_IP" != "null" ]; then
+            echo "LoadBalancer ready with IP: $EXTERNAL_IP"
             echo "url=http://$EXTERNAL_IP" >> $GITHUB_OUTPUT
             break
           fi
           echo "Waiting for LoadBalancer... ($i/30)"
           sleep 10
         done
+        
+        # If no external IP after 5 minutes, try to get service info
+        if [ -z "$EXTERNAL_IP" ] || [ "$EXTERNAL_IP" = "null" ]; then
+          echo "Warning: LoadBalancer IP not ready after 5 minutes"
+          kubectl get svc -n $NAMESPACE
+          echo "url=pending" >> $GITHUB_OUTPUT
+        fi
 
     - name: Comment PR with preview URL
       uses: actions/github-script@v7
       with:
         script: |
-          const commentBody = `🚀 **PR Preview Deployed!**
+          const url = '${{ steps.get-url.outputs.url }}';
           
-          📱 **Preview URL:** ${{ steps.get-url.outputs.url }}
+          let commentBody;
+          if (url && url !== 'pending') {
+            commentBody = `🚀 **PR Preview Deployed!**
+          
+          📱 **Preview URL:** ${url}
           🏷️ **Image Tag:** \`pr-${{ github.event.number }}-${{ github.sha }}\`
           📦 **Namespace:** \`pr-${{ github.event.number }}\`
           
           > 이 환경은 PR이 닫히면 자동으로 삭제됩니다.`;
+          } else {
+            commentBody = `🚀 **PR Preview Deployed!**
           
-          await github.rest.issues.createComment({
+          ⏳ **Status:** LoadBalancer 생성 중...
+          🏷️ **Image Tag:** \`pr-${{ github.event.number }}-${{ github.sha }}\`
+          📦 **Namespace:** \`pr-${{ github.event.number }}\`
+          
+          > LoadBalancer IP 할당까지 최대 5-10분이 소요될 수 있습니다.
+          > 이 환경은 PR이 닫히면 자동으로 삭제됩니다.`;
+          }
+          
+          // Check for existing bot comment
+          const { data: comments } = await github.rest.issues.listComments({
             owner: context.repo.owner,
             repo: context.repo.repo,
             issue_number: context.issue.number,
-            body: commentBody
           });
+          
+          const botComment = comments.find(comment => 
+            comment.user.type === 'Bot' && comment.body.includes('🚀 **PR Preview')
+          );
+          
+          if (botComment) {
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: botComment.id,
+              body: commentBody
+            });
+          } else {
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: commentBody
+            });
+          }
 
   cleanup-preview:
     if: github.event.action == 'closed'
@@ -118,7 +171,9 @@ jobs:
       env:
         NAMESPACE: pr-${{ github.event.number }}
       run: |
-        kubectl delete namespace $NAMESPACE --ignore-not-found=true
+        echo "Cleaning up namespace: $NAMESPACE"
+        kubectl delete namespace $NAMESPACE --ignore-not-found=true --timeout=60s
+        echo "Namespace $NAMESPACE cleanup completed"
 
     - name: Comment PR cleanup
       uses: actions/github-script@v7
@@ -130,5 +185,6 @@ jobs:
             issue_number: context.issue.number,
             body: `🗑️ **PR Preview Cleaned Up**
             
-            Namespace \`pr-${{ github.event.number }}\` has been deleted.`
+            Namespace \`pr-${{ github.event.number }}\` has been deleted.
+            All resources associated with this PR preview have been removed.`
           });
