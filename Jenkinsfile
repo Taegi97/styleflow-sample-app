@@ -1,6 +1,6 @@
 pipeline {
     agent any
-
+    
     tools {
         maven 'maven3'
         jdk 'jdk17'
@@ -8,17 +8,17 @@ pipeline {
 
     environment {
         IMAGE_NAME = "taegi-security/styleflow-app"
-        IMAGE_TAG = "" // 빈 문자열 또는 기본값 지정
+        IMAGE_TAG = "" // 기본값 빈 문자열로 설정
     }
 
     stages {
         stage('Build') {
             steps {
                 script {
-                    // 런타임에 IMAGE_TAG 설정
+                    // 런타임 시 env.BUILD_NUMBER를 IMAGE_TAG에 할당
                     env.IMAGE_TAG = env.BUILD_NUMBER
                 }
-                echo "Building the application..."
+                echo "Building the application with tag: ${env.IMAGE_TAG}"
                 sh 'mvn clean package'
             }
         }
