@@ -80,16 +80,6 @@ jobs:
       uses: actions/github-script@v7
       with:
         script: |
-          const { data: comments } = await github.rest.issues.listComments({
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            issue_number: context.issue.number,
-          });
-          
-          const botComment = comments.find(comment => 
-            comment.user.type === 'Bot' && comment.body.includes('🚀 PR Preview')
-          );
-          
           const commentBody = `🚀 **PR Preview Deployed!**
           
           📱 **Preview URL:** ${{ steps.get-url.outputs.url }}
@@ -98,21 +88,12 @@ jobs:
           
           > 이 환경은 PR이 닫히면 자동으로 삭제됩니다.`;
           
-          if (botComment) {
-            await github.rest.issues.updateComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              comment_id: botComment.id,
-              body: commentBody
-            });
-          } else {
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body: commentBody
-            });
-          }
+          await github.rest.issues.createComment({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.issue.number,
+            body: commentBody
+          });
 
   cleanup-preview:
     if: github.event.action == 'closed'
