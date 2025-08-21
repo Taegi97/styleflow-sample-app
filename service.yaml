@@ -1,0 +1,15 @@
+# service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: styleflow-service
+spec:
+  # 이 서비스는 app=styleflow-app 레이블을 가진 Pod를 찾아 연결합니다.
+  selector:
+    app: styleflow-app
+  ports:
+    - protocol: TCP
+      port: 80       # 외부에서 80 포트(HTTP 기본)로 들어오는 트래픽을
+      targetPort: 8080 # 컨테이너의 8080 포트로 전달합니다.
+  # 서비스 타입을 LoadBalancer로 지정하여 AWS에 실제 로드밸런서 생성을 요청합니다.
+  type: LoadBalancer
