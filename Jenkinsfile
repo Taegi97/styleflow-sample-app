@@ -1,6 +1,6 @@
 pipeline {
     agent any
-    
+
     tools {
         maven 'maven3'
         jdk 'jdk17'
@@ -8,23 +8,28 @@ pipeline {
 
     environment {
         IMAGE_NAME = "taegi-security/styleflow-app"
-        IMAGE_TAG = "" // 기본값 빈 문자열로 설정
+        IMAGE_TAG = "" // 기본값 빈 문자열
     }
 
     stages {
-        stage('Build') {
+        stage('Set Variables') {
             steps {
                 script {
-                    // 런타임 시 env.BUILD_NUMBER를 IMAGE_TAG에 할당
-                    env.IMAGE_TAG = env.BUILD_NUMBER
+                    // 빌드 번호를 IMAGE_TAG에 할당
+                    env.IMAGE_TAG = env.BUILD_NUMBER ?: 'latest'
+                    echo "Using image tag: ${env.IMAGE_TAG}"
                 }
+            }
+        }
+        stage('Build') {
+            steps {
                 echo "Building the application with tag: ${env.IMAGE_TAG}"
                 sh 'mvn clean package'
             }
         }
         stage('Build & Push Image') {
             steps {
-                echo "Building Docker image: ${env.IMAGE_NAME}:${env.IMAGE_TAG}"
+                echo "Building and pushing Docker image: ${env.IMAGE_NAME}:${env.IMAGE_TAG}"
                 withCredentials([usernamePassword(credentialsId: 'dockerhub-credentials', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
                     sh '''
                         docker build -t ${IMAGE_NAME}:${IMAGE_TAG} .
