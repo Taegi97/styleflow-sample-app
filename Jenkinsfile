@@ -7,7 +7,7 @@ pipeline {
     }
 
     environment {
-        IMAGE_NAME = "taeginam/styleflow-app"
+        IMAGE_NAME = "taeginam/styleflow-app"    // ← 여기 부분만 수정
     }
 
     stages {
@@ -33,13 +33,6 @@ pipeline {
                 }
             }
         }
-        stage('Deploy to EKS') {
-            steps {
-                echo "Deploying image ${env.IMAGE_NAME}:${env.IMAGE_TAG} to EKS..."
-                withCredentials([file(credentialsId: 'kubeconfig-credentials', variable: 'KUBECONFIG_FILE')]) {
-                    sh "kubectl --kubeconfig=${KUBECONFIG_FILE} set image deployment/styleflow-deployment styleflow-app-container=${IMAGE_NAME}:${IMAGE_TAG}"
-                }
-            }
-        }
+        // 이하 동일
     }
 }
