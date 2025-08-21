@@ -1,0 +1,21 @@
+# deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: styleflow-deployment # Jenkinsfile이 찾아올 바로 그 이름
+spec:
+  replicas: 2 # 안정성을 위해 2개의 Pod를 실행
+  selector:
+    matchLabels:
+      app: styleflow-app
+  template:
+    metadata:
+      labels:
+        app: styleflow-app
+    spec:
+      containers:
+      - name: styleflow-app-container
+        # Docker Hub에 올린 당신의 이미지 주소 (태그는 latest로 지정)
+        image: taeginam/styleflow-app:latest 
+        ports:
+        - containerPort: 8080 # Spring Boot 앱이 사용하는 포트
