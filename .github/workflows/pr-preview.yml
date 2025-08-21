@@ -59,8 +59,8 @@ jobs:
         # Create namespace if not exists
         kubectl create namespace $NAMESPACE --dry-run=client -o yaml | kubectl apply -f - --validate=false
         
-        # Wait a moment for namespace to be ready
-        sleep 2
+        # Wait for namespace to be ready
+        sleep 3
         
         # Apply deployment with environment variable substitution
         envsubst < k8s/deployment.yaml | kubectl apply -n $NAMESPACE -f - --validate=false
@@ -80,7 +80,7 @@ jobs:
         for i in {1..30}; do
           EXTERNAL_IP=$(kubectl get svc styleflow-service -n $NAMESPACE -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
           if [ ! -z "$EXTERNAL_IP" ] && [ "$EXTERNAL_IP" != "null" ]; then
-            echo "LoadBalancer ready with IP: $EXTERNAL_IP"
+            echo "LoadBalancer ready with hostname: $EXTERNAL_IP"
             echo "url=http://$EXTERNAL_IP" >> $GITHUB_OUTPUT
             break
           fi
@@ -88,11 +88,17 @@ jobs:
           sleep 10
         done
         
-        # If no external IP after 5 minutes, try to get service info
+        # If no external hostname after 5 minutes, check for IP
         if [ -z "$EXTERNAL_IP" ] || [ "$EXTERNAL_IP" = "null" ]; then
-          echo "Warning: LoadBalancer IP not ready after 5 minutes"
-          kubectl get svc -n $NAMESPACE
-          echo "url=pending" >> $GITHUB_OUTPUT
+          EXTERNAL_IP=$(kubectl get svc styleflow-service -n $NAMESPACE -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
+          if [ ! -z "$EXTERNAL_IP" ] && [ "$EXTERNAL_IP" != "null" ]; then
+            echo "LoadBalancer ready with IP: $EXTERNAL_IP"
+            echo "url=http://$EXTERNAL_IP" >> $GITHUB_OUTPUT
+          else
+            echo "Warning: LoadBalancer not ready after 5 minutes"
+            kubectl get svc -n $NAMESPACE
+            echo "url=pending" >> $GITHUB_OUTPUT
+          fi
         fi
 
     - name: Comment PR with preview URL
@@ -172,7 +178,7 @@ jobs:
         NAMESPACE: pr-${{ github.event.number }}
       run: |
         echo "Cleaning up namespace: $NAMESPACE"
-        kubectl delete namespace $NAMESPACE --ignore-not-found=true --timeout=60s
+        kubectl delete namespace $NAMESPACE --ignore-not-found=true --timeout=60s --validate=false
         echo "Namespace $NAMESPACE cleanup completed"
 
     - name: Comment PR cleanup
