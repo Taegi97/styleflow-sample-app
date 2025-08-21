@@ -7,7 +7,7 @@ pipeline {
     }
 
     environment {
-        IMAGE_NAME = "taegi-security/styleflow-app"
+        IMAGE_NAME = "taeginam/styleflow-app"
     }
 
     stages {
