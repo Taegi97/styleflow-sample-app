@@ -8,21 +8,16 @@ pipeline {
 
     environment {
         IMAGE_NAME = "taegi-security/styleflow-app"
-        IMAGE_TAG = ""  // 빈 문자열로 초기화
     }
 
     stages {
-        stage('Initialize') {
-            steps {
-                script {
-                    env.IMAGE_TAG = env.BUILD_NUMBER ?: "latest"
-                    echo "Using image tag: ${env.IMAGE_TAG}"
-                }
-            }
-        }
         stage('Build') {
             steps {
-                echo "Building the application with tag: ${env.IMAGE_TAG}"
+                script {
+                    env.IMAGE_TAG = env.BUILD_NUMBER
+                    echo "Using image tag: ${env.IMAGE_TAG}"
+                }
+                echo 'Building the application...'
                 sh 'mvn clean package'
             }
         }
