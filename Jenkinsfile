@@ -8,25 +8,26 @@ pipeline {
 
     environment {
         IMAGE_NAME = "taegi-security/styleflow-app"
-        IMAGE_TAG = "" // 기본값 빈 문자열
+        IMAGE_TAG = "" // 빈 값으로 초기화
     }
 
     stages {
         stage('Set Variables') {
             steps {
                 script {
-                    // 빌드 번호를 IMAGE_TAG에 할당
                     env.IMAGE_TAG = env.BUILD_NUMBER ?: 'latest'
                     echo "Using image tag: ${env.IMAGE_TAG}"
                 }
             }
         }
+
         stage('Build') {
             steps {
                 echo "Building the application with tag: ${env.IMAGE_TAG}"
                 sh 'mvn clean package'
             }
         }
+
         stage('Build & Push Image') {
             steps {
                 echo "Building and pushing Docker image: ${env.IMAGE_NAME}:${env.IMAGE_TAG}"
@@ -39,6 +40,7 @@ pipeline {
                 }
             }
         }
+
         stage('Deploy to EKS') {
             steps {
                 echo "Deploying image ${env.IMAGE_NAME}:${env.IMAGE_TAG} to EKS..."
