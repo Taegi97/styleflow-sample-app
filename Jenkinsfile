@@ -1,39 +1,31 @@
-// Jenkinsfile (FINAL CORRECTED VERSION)
+// Jenkinsfile (FINAL AUTHENTICATED VERSION)
 pipeline {
     agent any
-    
+
     tools {
         maven 'maven3'
         jdk 'jdk17'
     }
 
     environment {
-        // Docker Hub 사용자 이름/이미지 이름. 정확한지 다시 한번 확인하십시오.
-        IMAGE_NAME = "taeginam/styleflow-app" 
+        IMAGE_NAME = "taeginam/styleflow-app"
+        // EKS 클러스터가 있는 AWS 리전을 지정합니다.
+        AWS_REGION = "ap-northeast-2" 
     }
 
     stages {
         stage('Build') {
             steps {
-                echo 'Building the application...'
                 sh 'mvn clean package'
             }
         }
         stage('Build & Push Image') {
             steps {
-                // script 블록을 추가하여 변수 선언 및 쉘 명령을 함께 사용합니다.
                 script {
                     withCredentials([usernamePassword(credentialsId: 'dockerhub-credentials', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
                         def imageTag = env.BUILD_NUMBER
-                        echo "Building and pushing Docker image: ${IMAGE_NAME}:${imageTag}"
-
-                        // 1. Docker 이미지 빌드
                         sh "docker build -t ${IMAGE_NAME}:${imageTag} ."
-                        
-                        // 2. Docker Hub 로그인
                         sh "echo \"${DOCKER_PASS}\" | docker login -u \"${DOCKER_USER}\" --password-stdin"
-                        
-                        // 3. Docker Hub으로 이미지 푸시
                         sh "docker push ${IMAGE_NAME}:${imageTag}"
                     }
                 }
@@ -41,16 +33,17 @@ pipeline {
         }
         stage('Deploy to EKS') {
             steps {
-                // script 블록을 추가하여 변수 선언 및 쉘 명령을 함께 사용합니다.
-                script {
-                    withCredentials([file(credentialsId: 'kubeconfig-credentials', variable: 'KUBECONFIG_FILE')]) {
+                // withAWS 블록으로 감싸서, 이 안의 모든 명령어가 'aws-credentials'를 사용하도록 합니다.
+                withAWS(credentials: 'aws-credentials', region: env.AWS_REGION) {
+                    script {
                         def imageTag = env.BUILD_NUMBER
                         echo "Deploying image ${IMAGE_NAME}:${imageTag} to EKS..."
 
-                        // 참고: 이 단계는 아직 성공하지 않습니다.
-                        // 먼저 EKS 클러스터에 styleflow-deployment 라는 이름의 Deployment를
-                        // 한번은 수동으로 만들어주어야 합니다.
-                        sh "kubectl --kubeconfig=${KUBECONFIG_FILE} set image deployment/styleflow-deployment styleflow-app-container=${IMAGE_NAME}:${imageTag}"
+                        // 1. kubectl이 이 컴퓨터의 kubeconfig를 사용하도록 업데이트합니다.
+                        sh "aws eks update-kubeconfig --name styleflow-cluster"
+
+                        // 2. Deployment의 이미지를 새로운 버전으로 교체합니다.
+                        sh "kubectl set image deployment/styleflow-deployment styleflow-app-container=${IMAGE_NAME}:${imageTag}"
                     }
                 }
             }
