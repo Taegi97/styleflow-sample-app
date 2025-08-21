@@ -56,16 +56,9 @@ jobs:
         IMAGE_TAG: pr-${{ github.event.number }}-${{ github.sha }}
         NAMESPACE: pr-${{ github.event.number }}
       run: |
-        # Create namespace if not exists
         kubectl create namespace $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
-        
-        # Apply deployment with PR-specific image
         envsubst < k8s/deployment.yaml | kubectl apply -n $NAMESPACE -f -
-        
-        # Apply service
         kubectl apply -n $NAMESPACE -f k8s/service.yaml
-        
-        # Wait for deployment to be ready
         kubectl rollout status deployment/styleflow-deployment -n $NAMESPACE --timeout=300s
 
     - name: Get external URL
@@ -73,7 +66,6 @@ jobs:
       env:
         NAMESPACE: pr-${{ github.event.number }}
       run: |
-        # Wait for LoadBalancer to get external IP
         for i in {1..30}; do
           EXTERNAL_IP=$(kubectl get svc styleflow-service -n $NAMESPACE -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
           if [ ! -z "$EXTERNAL_IP" ]; then
