@@ -8,7 +8,7 @@ pipeline {
 
     environment {
         IMAGE_NAME = "taeginam/styleflow-app"
-        AWS_REGION = "ap-northeast-2" 
+        AWS_REGION = "ap-northeast-2"
     }
 
     stages {
@@ -17,6 +17,7 @@ pipeline {
                 sh 'mvn clean package'
             }
         }
+
         stage('Build & Push Image') {
             steps {
                 script {
@@ -29,18 +30,19 @@ pipeline {
                 }
             }
         }
+
         stage('Deploy to EKS') {
             steps {
-                // AWS 인증 정보와 리전을 지정하여 withAWS 블록을 사용
+                // withAWS 플러그인 사용, AWS 인증 및 리전 지정
                 withAWS(credentials: 'aws-credentials', region: env.AWS_REGION) {
                     script {
                         def imageTag = env.BUILD_NUMBER
                         echo "Deploying image ${IMAGE_NAME}:${imageTag} to EKS..."
 
-                        // kubeconfig 업데이트
-                        sh "aws eks update-kubeconfig --name styleflow-cluster"
+                        // kubeconfig 재생성(필요 시 기존 config 삭제는 별도 조치)
+                        sh "aws eks update-kubeconfig --name styleflow-cluster --region ${env.AWS_REGION}"
 
-                        // Deployment 이미지 교체
+                        // Kubernetes Deployment에 이미지 태그 업데이트
                         sh "kubectl set image deployment/styleflow-deployment styleflow-app-container=${IMAGE_NAME}:${imageTag}"
                     }
                 }
