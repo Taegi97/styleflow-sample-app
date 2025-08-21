@@ -1,0 +1,16 @@
+# storageclass.yaml 파일 생성
+@"
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: gp2
+provisioner: kubernetes.io/aws-ebs
+parameters:
+  type: gp2
+  fsType: ext4
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true
+"@ | Out-File -FilePath storageclass.yaml -Encoding UTF8
+
+# 파일 적용
+kubectl apply -f storageclass.yaml

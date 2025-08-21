@@ -1,0 +1,35 @@
+# loki-values.yaml
+deploymentMode: SingleBinary
+
+loki:
+  auth_enabled: false
+  commonConfig:
+    replication_factor: 1
+  storage:
+    type: filesystem
+    filesystem:
+      chunks_directory: /var/loki/chunks
+      rules_directory: /var/loki/rules
+  
+singleBinary:
+  replicas: 1
+  persistence:
+    enabled: true
+    storageClassName: gp2-ebs-csi
+    size: 10Gi
+
+# 분산 구성 요소 비활성화
+backend:
+  replicas: 0
+read:
+  replicas: 0  
+write:
+  replicas: 0
+
+# 네트워크 정책 비활성화
+networkPolicy:
+  enabled: false
+
+# 서비스 모니터 비활성화 (선택사항)
+serviceMonitor:
+  enabled: false
