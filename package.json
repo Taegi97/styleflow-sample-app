@@ -1,0 +1,13 @@
+﻿{
+  "name": "styleflow-testing",
+  "version": "1.0.0",
+  "devDependencies": {
+    "@playwright/test": "^1.40.0",
+    "lighthouse": "^11.4.0"
+  },
+  "scripts": {
+    "test:e2e": "playwright test --config=tests/config/playwright.config.js",
+    "test:e2e:headed": "playwright test --config=tests/config/playwright.config.js --headed",
+    "test:performance": "lighthouse --chrome-flags='--headless' --output json --output-path=./reports/lighthouse.json"
+  }
+}
