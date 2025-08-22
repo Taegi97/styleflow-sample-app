@@ -3,7 +3,7 @@ kind: Deployment
 metadata:
   name: styleflow-deployment
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: styleflow-app
@@ -12,21 +12,8 @@ spec:
       labels:
         app: styleflow-app
     spec:
-      terminationGracePeriodSeconds: 60
       containers:
       - name: styleflow-app-container
-        image: ${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}
+        image: ${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG} # GitHub Actions가 이 부분을 바꿔치기할 것입니다.
         ports:
         - containerPort: 8080
-        livenessProbe:
-          httpGet:
-            path: /
-            port: 8080
-          initialDelaySeconds: 30
-          periodSeconds: 10
-        readinessProbe:
-          httpGet:
-            path: /
-            port: 8080
-          initialDelaySeconds: 10
-          periodSeconds: 5

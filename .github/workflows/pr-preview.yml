@@ -1,3 +1,8 @@
+# 기존 잘못된 파일 제거
+Remove-Item .github\workflows\pr-preview.yml -Force -ErrorAction SilentlyContinue
+
+# 올바른 워크플로우 파일 생성
+@'
 name: PR Preview Deploy
 
 on:
@@ -69,7 +74,7 @@ jobs:
         kubectl apply -n $NAMESPACE -f k8s/service.yaml --validate=false
         
         # Wait for deployment to be ready
-        kubectl rollout status deployment/styleflow-deployment -n $NAMESPACE --timeout=600s
+        kubectl rollout status deployment/styleflow-deployment -n $NAMESPACE --timeout=300s
 
     - name: Get external URL
       id: get-url
@@ -121,10 +126,10 @@ jobs:
         PREVIEW_URL: ${{ steps.get-url.outputs.url }}
       run: |
         if [ "$PREVIEW_URL" != "pending" ] && [ ! -z "$PREVIEW_URL" ]; then
-          echo " Running E2E tests against: $PREVIEW_URL"
+          echo "🧪 Running E2E tests against: $PREVIEW_URL"
           npm run test:e2e
         else
-          echo " Skipping E2E tests - Preview URL not ready"
+          echo "⏭️ Skipping E2E tests - Preview URL not ready"
         fi
       continue-on-error: true
 
@@ -147,7 +152,7 @@ jobs:
           const url = '${{ steps.get-url.outputs.url }}';
           
           let testResults = {
-            status: '',
+            status: '⏭️',
             summary: 'Tests skipped (Preview URL not ready)',
             details: ''
           };
@@ -162,16 +167,16 @@ jobs:
               const total = passed + failed;
               
               testResults = {
-                status: failed === 0 ? '' : '',
+                status: failed === 0 ? '✅' : '❌',
                 summary: `${passed}/${total} tests passed`,
                 details: failed === 0 
-                  ? ' All tests passed!' 
-                  : ` ${failed} test(s) failed - [View Details](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})`
+                  ? '🎉 All tests passed!' 
+                  : `❌ ${failed} test(s) failed - [View Details](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})`
               };
             }
           } catch (error) {
             testResults = {
-              status: '',
+              status: '❌',
               summary: 'Test execution error',
               details: 'Failed to parse test results'
             };
@@ -179,27 +184,27 @@ jobs:
           
           let commentBody;
           if (url && url !== 'pending') {
-            commentBody = ` **PR Preview Deployed!**
+            commentBody = `🚀 **PR Preview Deployed!**
           
-           **Preview URL:** ${url}
-           **Image Tag:** \`pr-${{ github.event.number }}-${{ github.sha }}\`
-           **Namespace:** \`pr-${{ github.event.number }}\`
+          📱 **Preview URL:** ${url}
+          🏷️ **Image Tag:** \`pr-${{ github.event.number }}-${{ github.sha }}\`
+          📦 **Namespace:** \`pr-${{ github.event.number }}\`
           
-           **Automated Testing:**
+          🧪 **Automated Testing:**
           ${testResults.status} **E2E Tests:** ${testResults.summary}
           ${testResults.details}
           
-           [View Test Reports](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          📊 [View Test Reports](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
           
           > This environment will be automatically deleted when the PR is closed.`;
           } else {
-            commentBody = ` **PR Preview Deployed!**
+            commentBody = `🚀 **PR Preview Deployed!**
           
-           **Status:** LoadBalancer provisioning...
-           **Image Tag:** \`pr-${{ github.event.number }}-${{ github.sha }}\`
-           **Namespace:** \`pr-${{ github.event.number }}\`
+          ⏳ **Status:** LoadBalancer provisioning...
+          🏷️ **Image Tag:** \`pr-${{ github.event.number }}-${{ github.sha }}\`
+          📦 **Namespace:** \`pr-${{ github.event.number }}\`
           
-           **Automated Testing:**
+          🧪 **Automated Testing:**
           ${testResults.status} **E2E Tests:** ${testResults.summary}
           
           > LoadBalancer IP allocation may take up to 5-10 minutes.
@@ -214,7 +219,7 @@ jobs:
           });
           
           const botComment = comments.find(comment => 
-            comment.user.type === 'Bot' && comment.body.includes(' **PR Preview')
+            comment.user.type === 'Bot' && comment.body.includes('🚀 **PR Preview')
           );
           
           if (botComment) {
@@ -268,8 +273,9 @@ jobs:
             owner: context.repo.owner,
             repo: context.repo.repo,
             issue_number: context.issue.number,
-            body: ` **PR Preview Cleaned Up**
+            body: `🗑️ **PR Preview Cleaned Up**
             
             Namespace \`pr-${{ github.event.number }}\` has been deleted.
             All resources associated with this PR preview have been removed.`
           });
+'@ | Out-File -FilePath ".github\workflows\pr-preview.yml" -Encoding UTF8
