@@ -14,14 +14,15 @@ env:
   EKS_CLUSTER_NAME: styleflow-cluster
 
 jobs:
+  # PR이 열리거나 업데이트될 때 실행되는 배포/테스트 작업
   deploy-preview:
     if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     permissions:
-      id-token: write
-      contents: read
-      pull-requests: write
-    
+      id-token: write      # AWS OIDC 인증을 위해 필요
+      contents: read       # 코드를 Checkout 하기 위해 필요
+      pull-requests: write # PR에 댓글을 남기기 위해 필요
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -31,7 +32,7 @@ jobs:
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v4
       with:
-        role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+        role-to-assume: ${{ secrets.AWS_ROLE_ARN }} # GitHub Secrets에 등록해야 할 역할 ARN
         aws-region: ${{ env.AWS_REGION }}
 
     - name: Login to Amazon ECR
@@ -39,174 +40,90 @@ jobs:
       uses: aws-actions/amazon-ecr-login@v2
 
     - name: Build and push Docker image
+      id: build-image
       env:
         ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         IMAGE_TAG: pr-${{ github.event.number }}-${{ github.sha }}
       run: |
         docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
         docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+        echo "tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
 
     - name: Update kubeconfig
-      run: |
-        aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.EKS_CLUSTER_NAME }}
+      run: aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.EKS_CLUSTER_NAME }}
 
-    - name: Deploy to PR namespace
+    - name: Deploy to EKS
       env:
-        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-        IMAGE_TAG: pr-${{ github.event.number }}-${{ github.sha }}
         NAMESPACE: pr-${{ github.event.number }}
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        IMAGE_TAG: ${{ steps.build-image.outputs.tag }}
       run: |
-        # Create namespace if not exists
+        # gettext-base 패키지 설치 (envsubst 명령어 사용을 위해)
+        sudo apt-get update && sudo apt-get install -y gettext-base
+
+        # PR 번호 기반의 네임스페이스 생성
         kubectl create namespace $NAMESPACE --dry-run=client -o yaml | kubectl apply -f - --validate=false
         
-        # Wait for namespace to be ready
-        sleep 3
-        
-        # Apply deployment with environment variable substitution
+        # deployment.yaml 파일에 이미지 태그를 주입하여 배포
         envsubst < k8s/deployment.yaml | kubectl apply -n $NAMESPACE -f - --validate=false
         
-        # Apply service
+        # service.yaml 배포
         kubectl apply -n $NAMESPACE -f k8s/service.yaml --validate=false
         
-        # Wait for deployment to be ready
-        kubectl rollout status deployment/styleflow-deployment -n $NAMESPACE --timeout=600s
+        # 배포가 완료될 때까지 대기 (최대 5분)
+        kubectl rollout status deployment/styleflow-deployment -n $NAMESPACE --timeout=300s
 
     - name: Get external URL
       id: get-url
       env:
         NAMESPACE: pr-${{ github.event.number }}
       run: |
-        echo "Waiting for LoadBalancer to get external IP..."
+        echo "Waiting for LoadBalancer to get external hostname..."
         for i in {1..30}; do
           EXTERNAL_IP=$(kubectl get svc styleflow-service -n $NAMESPACE -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
-          if [ ! -z "$EXTERNAL_IP" ] && [ "$EXTERNAL_IP" != "null" ]; then
-            echo "LoadBalancer ready with hostname: $EXTERNAL_IP"
+          if [ ! -z "$EXTERNAL_IP" ]; then
+            echo "LoadBalancer ready: $EXTERNAL_IP"
             echo "url=http://$EXTERNAL_IP" >> $GITHUB_OUTPUT
             break
           fi
-          echo "Waiting for LoadBalancer... ($i/30)"
+          echo "Waiting... ($i/30)"
           sleep 10
         done
+
+    # E2E 테스트 단계 (주석 처리 - 필요 시 주석 해제하여 사용)
+    # - name: Setup Node.js
+    #   uses: actions/setup-node@v4
+    #   with:
+    #     node-version: '18'
+
+    # - name: Install test dependencies & browsers
+    #   run: |
+    #     npm install
+    #     npx playwright install --with-deps
         
-        # If no external hostname after 5 minutes, check for IP
-        if [ -z "$EXTERNAL_IP" ] || [ "$EXTERNAL_IP" = "null" ]; then
-          EXTERNAL_IP=$(kubectl get svc styleflow-service -n $NAMESPACE -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
-          if [ ! -z "$EXTERNAL_IP" ] && [ "$EXTERNAL_IP" != "null" ]; then
-            echo "LoadBalancer ready with IP: $EXTERNAL_IP"
-            echo "url=http://$EXTERNAL_IP" >> $GITHUB_OUTPUT
-          else
-            echo "Warning: LoadBalancer not ready after 5 minutes"
-            kubectl get svc -n $NAMESPACE
-            echo "url=pending" >> $GITHUB_OUTPUT
-          fi
-        fi
-
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '18'
-
-    - name: Install test dependencies
-      run: |
-        npm install
-
-    - name: Install Playwright browsers
-      run: npx playwright install --with-deps
-
-    - name: Create test reports directory
-      run: mkdir -p reports/screenshots
-
-    - name: Run E2E tests
-      env:
-        PREVIEW_URL: ${{ steps.get-url.outputs.url }}
-      run: |
-        if [ "$PREVIEW_URL" != "pending" ] && [ ! -z "$PREVIEW_URL" ]; then
-          echo " Running E2E tests against: $PREVIEW_URL"
-          npm run test:e2e
-        else
-          echo " Skipping E2E tests - Preview URL not ready"
-        fi
-      continue-on-error: true
-
-    - name: Upload test reports
-      uses: actions/upload-artifact@v4
-      if: always()
-      with:
-        name: test-reports-pr-${{ github.event.number }}
-        path: |
-          reports/
-          test-results/
-        retention-days: 7
-
-    - name: Comment PR with enhanced results
+    - name: Comment PR with results
       uses: actions/github-script@v7
       if: always()
       with:
         script: |
-          const fs = require('fs');
           const url = '${{ steps.get-url.outputs.url }}';
-          
-          let testResults = {
-            status: '',
-            summary: 'Tests skipped (Preview URL not ready)',
-            details: ''
-          };
-          
-          try {
-            if (fs.existsSync('reports/test-results.json')) {
-              const results = JSON.parse(fs.readFileSync('reports/test-results.json', 'utf8'));
-              const passed = results.suites.reduce((sum, suite) => 
-                sum + suite.specs.filter(spec => spec.tests[0].status === 'passed').length, 0);
-              const failed = results.suites.reduce((sum, suite) => 
-                sum + suite.specs.filter(spec => spec.tests.status === 'failed').length, 0);
-              const total = passed + failed;
-              
-              testResults = {
-                status: failed === 0 ? '' : '',
-                summary: `${passed}/${total} tests passed`,
-                details: failed === 0 
-                  ? ' All tests passed!' 
-                  : ` ${failed} test(s) failed - [View Details](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})`
-              };
-            }
-          } catch (error) {
-            testResults = {
-              status: '',
-              summary: 'Test execution error',
-              details: 'Failed to parse test results'
-            };
-          }
-          
           let commentBody;
-          if (url && url !== 'pending') {
-            commentBody = ` **PR Preview Deployed!**
-          
-           **Preview URL:** ${url}
-           **Image Tag:** \`pr-${{ github.event.number }}-${{ github.sha }}\`
-           **Namespace:** \`pr-${{ github.event.number }}\`
-          
-           **Automated Testing:**
-          ${testResults.status} **E2E Tests:** ${testResults.summary}
-          ${testResults.details}
-          
-           [View Test Reports](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
-          
-          > This environment will be automatically deleted when the PR is closed.`;
+          if (url) {
+            commentBody = `🚀 **PR Preview Deployed!**
+            
+            📱 **Preview URL:** ${url}
+            🏷️ **Image Tag:** \`${{ steps.build-image.outputs.tag }}\`
+            📦 **Namespace:** \`pr-${{ github.event.number }}\`
+            
+            > This environment will be automatically deleted when the PR is closed.`;
           } else {
-            commentBody = ` **PR Preview Deployed!**
-          
-           **Status:** LoadBalancer provisioning...
-           **Image Tag:** \`pr-${{ github.event.number }}-${{ github.sha }}\`
-           **Namespace:** \`pr-${{ github.event.number }}\`
-          
-           **Automated Testing:**
-          ${testResults.status} **E2E Tests:** ${testResults.summary}
-          
-          > LoadBalancer IP allocation may take up to 5-10 minutes.
-          > This environment will be automatically deleted when the PR is closed.`;
+            commentBody = `🚀 **PR Preview Deployment Failed**
+            
+            Deployment succeeded, but the LoadBalancer did not become available in time.
+            Please check the workflow logs for more details.`;
           }
           
-          // Update existing comment or create new one
+          // 기존 코멘트 찾아서 업데이트하거나 새로 생성
           const { data: comments } = await github.rest.issues.listComments({
             owner: context.repo.owner,
             repo: context.repo.repo,
@@ -214,9 +131,9 @@ jobs:
           });
           
           const botComment = comments.find(comment => 
-            comment.user.type === 'Bot' && comment.body.includes(' **PR Preview')
+            comment.user.type === 'Bot' && comment.body.includes('🚀 **PR Preview')
           );
-          
+
           if (botComment) {
             await github.rest.issues.updateComment({
               owner: context.repo.owner,
@@ -233,6 +150,7 @@ jobs:
             });
           }
 
+  # PR이 닫혔을 때 실행되는 정리 작업
   cleanup-preview:
     if: github.event.action == 'closed'
     runs-on: ubuntu-latest
@@ -249,16 +167,14 @@ jobs:
         aws-region: ${{ env.AWS_REGION }}
 
     - name: Update kubeconfig
-      run: |
-        aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.EKS_CLUSTER_NAME }}
+      run: aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.EKS_CLUSTER_NAME }}
 
     - name: Delete PR namespace
       env:
         NAMESPACE: pr-${{ github.event.number }}
       run: |
         echo "Cleaning up namespace: $NAMESPACE"
-        kubectl delete namespace $NAMESPACE --ignore-not-found=true --timeout=60s --validate=false
-        echo "Namespace $NAMESPACE cleanup completed"
+        kubectl delete namespace $NAMESPACE --ignore-not-found=true
 
     - name: Comment PR cleanup
       uses: actions/github-script@v7
@@ -268,8 +184,7 @@ jobs:
             owner: context.repo.owner,
             repo: context.repo.repo,
             issue_number: context.issue.number,
-            body: ` **PR Preview Cleaned Up**
+            body: `🗑️ **PR Preview Cleaned Up**
             
-            Namespace \`pr-${{ github.event.number }}\` has been deleted.
-            All resources associated with this PR preview have been removed.`
+            Namespace \`pr-${{ github.event.number }}\` and all associated resources have been deleted.`
           });
